@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "es2021",
+    "outDir": "lib",
+    "sourceMap": true,
+    "strict": true
+  },
+  "compileOnSave": true,
+  "include": [
+    "src"
+  ]
+}
