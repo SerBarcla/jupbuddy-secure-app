@@ -3,24 +3,32 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // The 'admins' collection stores the UIDs of your real, authenticated admins.
-    // Only another authenticated Admin can add or remove people from this list.
-    match /admins/{uid} {
+    // The 'admins' collection
+    match /admins/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
+    }
+
+    // The 'users' collection (Operator profiles)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
+    }
+
+    // --- CORRECTED RULES ---
+    // Each collection must be matched separately.
+    // These collections can be read and written to only by Admins.
+
+    match /plods/{plodId} {
       allow read, write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
     }
 
-    // The 'users' collection stores the Operator profiles (name, PIN, etc.).
-    // This collection is managed by Admins.
-    match /users/{userId} {
-      // Anyone can read the list of operators to attempt a login.
-      allow read: if true;
-      // Only authenticated Admins can create, update, or delete Operators.
-      allow write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
+    match /definitions/{definitionId} {
+      allow read, write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
     }
-    
-    // Your other collections (plods, definitions, logs) are now managed by Admins.
-    match /(plods|definitions|logs)/{docId} {
-        allow read, write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
+
+    match /logs/{logId} {
+      allow read, write: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/admins/admin_list).data.uids;
     }
   }
 }
