@@ -1,119 +1,123 @@
-import React, { useState, useEffect, useMemo, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, createContext, useContext, useRef } from 'react';
 import type { FC, ReactNode } from 'react';
 import styled from 'styled-components';
-import { collection, getDocs, query, where, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, writeBatch, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-// FIX: Removed all unused icons, keeping only the ones in use
-import { LogOut, Users as UsersIcon, PackagePlus, Square, X, Play } from 'lucide-react';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { LogOut, Users as UsersIcon, PackagePlus, Square, X, Play, Wifi, Zap, Eraser, Save } from 'lucide-react';
+import type { UserProfile, Plod, Definition, LogEntry, LoggedDataItem, } from '../types';
 
-
-// --- TYPE DEFINITIONS ---
-interface BaseItem {
-  id: string;
-  deleted?: boolean;
-}
-interface UserProfile extends BaseItem {
-  userId: string;
-  name: string;
-  systemRole: 'Admin' | 'Operator';
-  operationalRole: string;
-  allowedPlods: string[];
-  pin?: string;
-}
-interface Plod extends BaseItem {
-  name: string;
-}
-interface Definition extends BaseItem {
-  name: string;
-  unit: string;
-  linkedPlods: string[];
-}
-interface LoggedDataItem {
-  definitionId: string;
-  name: string;
-  value: string;
-  unit: string;
-}
-interface LogEntry extends BaseItem {
-  plodId: string;
-  plodName: string;
-  userId: string;
-  userName: string;
-  operationalRole: string;
-  startTime: string;
-  endTime: string;
-  duration: number;
-  shift: 'DS' | 'NS';
-  data: LoggedDataItem[];
-  coworkers: string[];
-  disclaimerSigned: boolean;
+// --- OPERATOR DATA CONTEXT (with Offline Sync) ---
+interface OperatorDataContextType {
+  logs: { get: LogEntry[]; set: React.Dispatch<React.SetStateAction<LogEntry[]>> };
+  addLogEntry: (logEntry: Omit<LogEntry, 'id' | 'updatedAt' | 'dirty' | 'deleted'>) => void;
+  handleSync: () => Promise<void>;
+  isSyncing: boolean;
+  needsSync: boolean;
 }
 
-// --- DATA PROVIDER ---
-interface DataContextType {
-  users: { get: UserProfile[] };
-  plods: { get: Plod[] };
-  definitions: { get: Definition[] };
-  addLogEntry: (logEntry: Omit<LogEntry, 'id'>) => Promise<void>;
-}
-
-const DataContext = createContext<DataContextType | null>(null);
-const useData = () => {
-    const context = useContext(DataContext);
-    if (!context) throw new Error("useData must be used within a DataProvider");
+const OperatorDataContext = createContext<OperatorDataContextType | null>(null);
+const useOperatorData = () => {
+    const context = useContext(OperatorDataContext);
+    if (!context) throw new Error("useOperatorData must be used within an OperatorDataProvider");
     return context;
 };
 
-const DataProvider: FC<{ children: ReactNode }> = ({ children }) => {
-    const [users, setUsers] = useState<UserProfile[]>([]);
-    const [plods, setPlods] = useState<Plod[]>([]);
-    const [definitions, setDefinitions] = useState<Definition[]>([]);
+const OperatorDataProvider: FC<{ children: ReactNode; operator: UserProfile }> = ({ children, operator }) => {
+    const [logs, setLogs] = useLocalStorage<LogEntry[]>(`jupbuddy_logs_${operator.userId}`, []);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [needsSync, setNeedsSync] = useState(false);
 
     useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const usersSnap = await getDocs(collection(db, 'users'));
-                setUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
+        setNeedsSync(logs.some(log => (log as any).dirty));
+    }, [logs]);
 
-                const plodsSnap = await getDocs(collection(db, 'plods'));
-                setPlods(plodsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Plod)));
-
-                const definitionsSnap = await getDocs(collection(db, 'definitions'));
-                setDefinitions(definitionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Definition)));
-            } catch (error) {
-                console.error("Error fetching initial data for operator:", error);
-            }
+    const addLogEntry = (logEntry: Omit<LogEntry, 'id' | 'updatedAt' | 'dirty' | 'deleted'>) => {
+        const newLog: LogEntry = {
+            ...logEntry,
+            id: `local_${Date.now()}`,
+            updatedAt: new Date().toISOString(),
+            dirty: true,
         };
-        fetchData();
-    }, []);
+        setLogs(prev => [...prev, newLog]);
+    };
 
-    const addLogEntry = async (logEntry: Omit<LogEntry, 'id'>) => {
+    const handleSync = async () => {
+        if (!navigator.onLine) {
+            alert("Cannot sync. You are offline.");
+            return;
+        }
+        setIsSyncing(true);
+        const batch = writeBatch(db);
+        const dirtyLogs = logs.filter(log => (log as any).dirty);
+
         try {
-            await addDoc(collection(db, 'logs'), logEntry);
-            alert("Plod logged successfully!");
+            for (const log of dirtyLogs) {
+                const { id, dirty, ...logData } = log as any;
+                const docRef = doc(collection(db, 'logs'));
+                batch.set(docRef, logData);
+            }
+            await batch.commit();
+            
+            setLogs(prev => prev.filter(log => !(log as any).dirty));
+            alert("Sync successful!");
         } catch (error) {
-            console.error("Error adding log entry:", error);
-            alert("Failed to log plod.");
+            console.error("Operator sync failed:", error);
+            alert(`Sync failed: ${(error as Error).message}`);
+        } finally {
+            setIsSyncing(false);
         }
     };
 
-    const value = {
-        users: { get: users },
-        plods: { get: plods },
-        definitions: { get: definitions },
-        addLogEntry,
-    };
+    const value = { logs: { get: logs, set: setLogs }, addLogEntry, handleSync, isSyncing, needsSync };
 
-    return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+    return <OperatorDataContext.Provider value={value}>{children}</OperatorDataContext.Provider>;
 };
 
 
 // --- STYLED COMPONENTS & HELPER COMPONENTS ---
-const LoginContainer = styled.div` /* ... */ `;
-const LoginBox = styled.div` /* ... */ `;
-const Form = styled.form` /* ... */ `;
-const StyledInput = styled.input` /* ... */ `;
-const StyledButton = styled.button` /* ... */ `;
+const LoginContainer = styled.div`
+  min-height: 100vh;
+  background-color: #1c1917;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+`;
+const LoginBox = styled.div`
+  background-color: #44403c;
+  border: 1px solid #57534e;
+  border-radius: 1rem;
+  padding: 2rem;
+  width: 100%;
+  max-width: 28rem;
+`;
+const Form = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+`;
+const StyledInput = styled.input`
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    border: none;
+    background-color: #f5f5f4;
+    color: #292524;
+`;
+const StyledButton = styled.button`
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    border: none;
+    background-color: #059669;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
 const ModalContainer = styled.div`
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;
@@ -121,14 +125,14 @@ const ModalContainer = styled.div`
 const ModalContent = styled.div`
   background: white; padding: 2rem; border-radius: 0.5rem; width: 90%; max-width: 500px;
 `;
-const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: () => void }> = ({ children, isOpen, title, onClose }) => {
+const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose?: () => void }> = ({ children, isOpen, title, onClose }) => {
     if (!isOpen) return null;
     return (
-        <ModalContainer onClick={onClose}>
-            <ModalContent onClick={e => e.stopPropagation()}>
+        <ModalContainer>
+            <ModalContent>
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
                     <h2 style={{fontSize: '1.25rem', fontWeight: 'bold'}}>{title}</h2>
-                    <button onClick={onClose}><X /></button>
+                    {onClose && <button onClick={onClose}><X /></button>}
                 </div>
                 {children}
             </ModalContent>
@@ -136,8 +140,98 @@ const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: 
     );
 }
 
-const Button: FC<any> = ({ children, ...props }) => <button {...props}>{children}</button>;
+const Button: FC<any> = ({ children, icon: Icon, ...props }) => <button {...props} style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>{Icon && <Icon />} {children}</button>;
 const Input: FC<any> = (props) => <input {...props} />;
+
+// --- SIGNATURE CAPTURE COMPONENTS (Restored) ---
+const SignaturePad: FC<{ onSave: (signature: string) => void }> = ({ onSave }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    if ("touches" in e && e.touches.length > 0) {
+      return [e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top];
+    }
+    return [(e as React.MouseEvent).clientX - rect.left, (e as React.MouseEvent).clientY - rect.top];
+  };
+
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    const ctx = canvasRef.current!.getContext("2d");
+    if (!ctx) return;
+    const [x, y] = getCoords(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const ctx = canvasRef.current!.getContext("2d");
+    if (!ctx) return;
+    const [x, y] = getCoords(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => setIsDrawing(false);
+  const clearCanvas = () => {
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const handleSave = () => {
+    const canvas = canvasRef.current!;
+    const blank = document.createElement("canvas");
+    blank.width = canvas.width;
+    blank.height = canvas.height;
+    if (canvas.toDataURL() === blank.toDataURL()) {
+      alert("Please provide a signature.");
+      return;
+    }
+    onSave(canvas.toDataURL("image/png"));
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 2;
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <canvas
+        ref={canvasRef}
+        width="400"
+        height="200"
+        className="bg-stone-100 border border-stone-300 rounded-lg cursor-crosshair w-full"
+        onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+        onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
+      ></canvas>
+      <div className="flex justify-end gap-3">
+        <Button onClick={clearCanvas} icon={Eraser}>Clear</Button>
+        <Button onClick={handleSave} icon={Save}>Save Signature</Button>
+      </div>
+    </div>
+  );
+};
+
+const SignatureModal: FC<{ onSave: (signature: string) => void }> = ({ onSave }) => (
+  <Modal isOpen={true} title="Create Your Signature">
+    <p className="text-stone-700 font-semibold mb-4">
+      Please provide your signature. This will be used on all plods you log.
+    </p>
+    <SignaturePad onSave={onSave} />
+  </Modal>
+);
+
 
 // --- HELPER MODALS ---
 const AddDataModal: FC<{
@@ -175,7 +269,15 @@ const CoworkerModal: FC<{
   isOpen: boolean; onClose: () => void; onSave: (selected: string[]) => void;
   currentUser: UserProfile; selectedCoworkers: string[];
 }> = ({ isOpen, onClose, onSave, currentUser, selectedCoworkers }) => {
-  const { users: { get: allUsers } } = useData();
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  useEffect(() => {
+      const fetchUsers = async () => {
+          const usersSnap = await getDocs(collection(db, 'users'));
+          setUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
+      };
+      fetchUsers();
+  }, []);
+
   const [selected, setSelected] = useState<string[]>(selectedCoworkers);
 
   useEffect(() => { setSelected(selectedCoworkers); }, [selectedCoworkers, isOpen]);
@@ -185,7 +287,7 @@ const CoworkerModal: FC<{
   };
 
   const handleSave = () => { onSave(selected); onClose(); };
-  const availableUsers = allUsers.filter(u => u.id !== currentUser.id && !u.deleted);
+  const availableUsers = users.filter(u => u.id !== currentUser.id && !u.deleted);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Add Co-workers">
@@ -209,7 +311,20 @@ const CoworkerModal: FC<{
 
 // --- LIVE PLOD TRACKER ---
 const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
-    const { plods: { get: allPlods }, definitions: { get: allDefinitions }, addLogEntry } = useData();
+    const { addLogEntry } = useOperatorData();
+    const [plods, setPlods] = useState<Plod[]>([]);
+    const [definitions, setDefinitions] = useState<Definition[]>([]);
+    
+    useEffect(() => {
+        const fetchData = async () => {
+            const plodsSnap = await getDocs(collection(db, 'plods'));
+            setPlods(plodsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Plod)));
+            const definitionsSnap = await getDocs(collection(db, 'definitions'));
+            setDefinitions(definitionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Definition)));
+        };
+        fetchData();
+    }, []);
+
     const [selectedPlod, setSelectedPlod] = useState("");
     const [isActive, setIsActive] = useState(false);
     const [startTime, setStartTime] = useState<number | null>(null);
@@ -220,13 +335,13 @@ const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
     const [coworkers, setCoworkers] = useState<string[]>([]);
 
     const allowedPlods = useMemo(() => {
-        return allPlods.filter(p => user.allowedPlods?.includes(p.id) && !p.deleted);
-    }, [allPlods, user]);
+        return plods.filter(p => user.allowedPlods?.includes(p.id) && !p.deleted);
+    }, [plods, user]);
     
     const currentPlodDefinitions = useMemo(() => {
         if (!selectedPlod) return [];
-        return allDefinitions.filter(def => def.linkedPlods?.includes(selectedPlod) && !def.deleted);
-    }, [allDefinitions, selectedPlod]);
+        return definitions.filter(def => def.linkedPlods?.includes(selectedPlod) && !def.deleted);
+    }, [definitions, selectedPlod]);
 
     useEffect(() => {
         let interval: NodeJS.Timeout;
@@ -252,14 +367,14 @@ const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
         setCoworkers([]);
     };
     
-    const handleStop = async () => {
+    const handleStop = () => {
         if (!startTime) return;
         const endTime = new Date();
         const durationSeconds = Math.floor((endTime.getTime() - startTime) / 1000);
         const shift: 'DS' | 'NS' = endTime.getHours() >= 6 && endTime.getHours() < 18 ? "DS" : "NS";
-        const plodDetails = allPlods.find(a => a.id === selectedPlod);
+        const plodDetails = plods.find(a => a.id === selectedPlod);
 
-        const logEntry: Omit<LogEntry, 'id'> = {
+        addLogEntry({
             plodId: selectedPlod,
             plodName: plodDetails?.name || "Unknown",
             userId: user.userId,
@@ -272,9 +387,8 @@ const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
             data: loggedData,
             coworkers: coworkers,
             disclaimerSigned: true,
-        };
+        });
 
-        await addLogEntry(logEntry);
         setIsActive(false);
         setSelectedPlod("");
         setStartTime(null);
@@ -293,7 +407,7 @@ const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
                 </div>
             ) : (
                 <div>
-                    <p>Current Plod: {allPlods.find(a => a.id === selectedPlod)?.name}</p>
+                    <p>Current Plod: {plods.find(a => a.id === selectedPlod)?.name}</p>
                     <p>Time Elapsed: {formatTime(elapsedTime)}</p>
                     <Button onClick={() => setDataModalOpen(true)}><PackagePlus /> Add Data</Button>
                     <Button onClick={() => setCoworkerModalOpen(true)}><UsersIcon /> Add Co-workers</Button>
@@ -318,7 +432,7 @@ const LivePlodTracker: FC<{ user: UserProfile }> = ({ user }) => {
 };
 
 // --- OPERATOR LOGIN COMPONENT ---
-const OperatorLoginPage = ({ onLoginSuccess }: { onLoginSuccess: (operatorData: UserProfile) => void }) => {
+const OperatorLoginPage: FC<{ onLoginSuccess: (operatorData: UserProfile) => void }> = ({ onLoginSuccess }) => {
     const [operatorId, setOperatorId] = useState('');
     const [pin, setPin] = useState('');
     const [error, setError] = useState('');
@@ -367,28 +481,65 @@ const OperatorLoginPage = ({ onLoginSuccess }: { onLoginSuccess: (operatorData: 
 
 // --- OPERATOR DASHBOARD ---
 const OperatorDashboard: FC<{ operator: UserProfile; onLogout: () => void }> = ({ operator, onLogout }) => {
+    const { handleSync, isSyncing, needsSync } = useOperatorData();
     return (
         <div style={{ padding: '2rem' }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <h1>Welcome Operator, {operator.name}</h1>
-                <Button onClick={onLogout}><LogOut /> Logout</Button>
+                <div>
+                    <Button onClick={handleSync} disabled={isSyncing || !needsSync}>
+                        {isSyncing ? <Zap className="animate-spin"/> : <Wifi />}
+                        {isSyncing ? 'Syncing...' : 'Sync Now'}
+                        {needsSync && !isSyncing && <span style={{width: '10px', height: '10px', backgroundColor: 'orange', borderRadius: '50%', marginLeft: '8px'}}></span>}
+                    </Button>
+                    <Button onClick={onLogout} style={{marginLeft: '1rem'}}><LogOut /> Logout</Button>
+                </div>
             </header>
             <LivePlodTracker user={operator} />
         </div>
     );
 };
 
+
 // --- OPERATOR PORTAL ---
 export const OperatorPortal = () => {
     const [loggedInOperator, setLoggedInOperator] = useState<UserProfile | null>(null);
+    const [forceSignature, setForceSignature] = useState(false);
+
+    const handleLoginSuccess = (operatorData: UserProfile) => {
+        setLoggedInOperator(operatorData);
+        if (!operatorData.signature) {
+            setForceSignature(true);
+        }
+    };
+
+    const handleSignatureSaved = async (signature: string) => {
+        if (!loggedInOperator) return;
+        
+        try {
+            const userDocRef = doc(db, 'users', loggedInOperator.id);
+            await updateDoc(userDocRef, { signature: signature });
+
+            setLoggedInOperator(prev => ({ ...prev!, signature }));
+            setForceSignature(false);
+            alert("Signature saved successfully!");
+        } catch (error) {
+            console.error("Failed to save signature:", error);
+            alert("Could not save signature. Please try again.");
+        }
+    };
+
+    if (forceSignature && loggedInOperator) {
+        return <SignatureModal onSave={handleSignatureSaved} />;
+    }
 
     if (loggedInOperator) {
         return (
-            <DataProvider>
+            <OperatorDataProvider operator={loggedInOperator}>
                 <OperatorDashboard operator={loggedInOperator} onLogout={() => setLoggedInOperator(null)} />
-            </DataProvider>
+            </OperatorDataProvider>
         );
     }
 
-    return <OperatorLoginPage onLoginSuccess={setLoggedInOperator} />;
+    return <OperatorLoginPage onLoginSuccess={handleLoginSuccess} />;
 };

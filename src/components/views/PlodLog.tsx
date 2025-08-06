@@ -5,8 +5,39 @@ import { useData } from '../../contexts/DataContext';
 import type { LogEntry, UserProfile } from '../../types';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 
-// --- HELPER COMPONENTS (Self-contained for this file) ---
+// --- DYNAMIC SCRIPT LOADER (for Excel export) ---
+const loadedScripts: { [url: string]: 'loading' | 'loaded' } = {};
+function loadScript(url: string): Promise<void> {
+    if (loadedScripts[url] === 'loaded') return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+        if (loadedScripts[url] === 'loading') {
+            const interval = setInterval(() => {
+                if (loadedScripts[url] === 'loaded') {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 100);
+            return;
+        }
+        loadedScripts[url] = 'loading';
+        const script = document.createElement("script");
+        script.src = url;
+        script.type = "module";
+        script.async = true;
+        script.onload = () => {
+            loadedScripts[url] = 'loaded';
+            resolve();
+        };
+        script.onerror = () => {
+            reject(new Error(`Failed to load script: ${url}`));
+            delete loadedScripts[url];
+        };
+        document.body.appendChild(script);
+    });
+}
 
+
+// --- HELPER UI COMPONENTS ---
 const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: () => void }> = ({ children, isOpen, title, onClose }) => {
     if (!isOpen) return null;
     return (
@@ -75,7 +106,6 @@ const PlodDetailModal: FC<{ log: LogEntry; onClose: () => void; users: UserProfi
 
 
 // --- PLOD LOG VIEW COMPONENT ---
-
 export const PlodLog: FC = () => {
     const { logs: { get: logs }, users: { get: users }, plods: { get: plods } } = useData();
     const [companySettings] = useLocalStorage("companySettings", { name: "JUPBuddy Report", logo: "" });
@@ -95,16 +125,122 @@ export const PlodLog: FC = () => {
                 if (logDate > dateTo) return false;
             }
             if (filters.shift && log.shift !== filters.shift) return false;
-            if (filters.userId && log.userId !== log.userId) return false;
-            if (filters.plodId && log.plodId !== log.plodId) return false;
+            if (filters.userId && log.userId !== filters.userId) return false;
+            if (filters.plodId && log.plodId !== filters.plodId) return false;
             return true;
         }).sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
     }, [logs, filters]);
 
     const formatDuration = (s: number) => `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m ${s%60}s`;
+    
+    // Helper function to prevent XSS attacks when generating HTML
+    const escapeHtml = (unsafe: string) => {
+        return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+    };
 
-    const printReport = () => { /* ... Full print logic from original code ... */ alert("Generating printable report..."); };
-    const exportToExcel = async () => { /* ... Full excel export logic from original code ... */ alert("Generating Excel export..."); };
+    const printReport = () => {
+        const printWindow = window.open("", "_blank");
+        if (!printWindow) {
+            alert("Could not open print window. Please disable your pop-up blocker.");
+            return;
+        }
+
+        const reportTitle = escapeHtml(companySettings.name || "JUPBuddy Plod Report");
+        let reportHtml = `
+            <html><head><title>${reportTitle}</title><style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+                body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; padding: 20px; }
+                .report-header { text-align: center; margin-bottom: 30px; }
+                .report-header img { max-height: 60px; max-width: 150px; }
+                .report-header h1 { font-size: 28px; color: #111827; margin: 0; }
+                .report-header p { font-size: 14px; color: #6b7280; margin-top: 5px; }
+                .card-container { display: flex; flex-wrap: wrap; gap: 20px; }
+                .card { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; width: 100%; box-sizing: border-box; page-break-inside: avoid; border: 1px solid #e5e7eb; }
+                .card-header h2 { font-size: 20px; font-weight: 700; color: #1f2937; margin: 0; }
+                .card-header p { font-size: 14px; color: #4b5563; margin: 5px 0 0; }
+                .card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 15px; }
+                .info-item .label { font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; margin-bottom: 4px; }
+                .info-item .value { font-size: 15px; color: #374151; }
+                .data-section { grid-column: 1 / -1; }
+                .data-section h3 { font-size: 16px; font-weight: 700; color: #1f2937; margin-bottom: 10px; border-top: 1px solid #e5e7eb; padding-top: 15px; }
+                .data-list { list-style: none; padding: 0; margin: 0; }
+                .data-list li { background-color: #f9fafb; padding: 8px 12px; border-radius: 6px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+                .signature-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: right; }
+                .signature-section img { max-height: 50px; display: inline-block; }
+                @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+            </style></head><body>
+            <div class="report-header">
+                ${companySettings.logo ? `<img src="${escapeHtml(companySettings.logo)}" alt="Company Logo">` : ''}
+                <h1>${reportTitle}</h1>
+                <p>Generated on: ${new Date().toLocaleString()}</p>
+            </div>
+            <div class="card-container">
+        `;
+
+        filteredLogs.forEach(log => {
+            const operator = users.find(u => u.userId === log.userId || u.id === log.userId);
+            const coworkers = (log.coworkers || []).map(id => users.find(u => u.id === id)?.name).filter(Boolean).join(", ");
+            reportHtml += `
+                <div class="card">
+                    <div class="card-header">
+                        <h2>${escapeHtml(log.plodName)}</h2>
+                        <p>${new Date(log.startTime).toLocaleString()}</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-item"><span class="label">User</span><span class="value">${escapeHtml(log.userName)} (${escapeHtml(log.operationalRole)})</span></div>
+                        <div class="info-item"><span class="label">Shift</span><span class="value">${escapeHtml(log.shift)}</span></div>
+                        <div class="info-item"><span class="label">Duration</span><span class="value">${formatDuration(log.duration)}</span></div>
+                        <div class="info-item"><span class="label">Time</span><span class="value">${new Date(log.startTime).toLocaleTimeString()} - ${new Date(log.endTime).toLocaleTimeString()}</span></div>
+                        ${coworkers ? `<div class="info-item data-section"><span class="label">Co-workers</span><span class="value">${escapeHtml(coworkers)}</span></div>` : ''}
+                        ${log.data && log.data.length > 0 ? `
+                            <div class="data-section">
+                                <h3>Logged Data & Consumables</h3>
+                                <ul class="data-list">${log.data.map(d => `<li><span>${escapeHtml(d.name)}</span> <span>${escapeHtml(d.value)} ${escapeHtml(d.unit || '')}</span></li>`).join('')}</ul>
+                            </div>` : ''
+                        }
+                    </div>
+                    ${operator?.signature ? `<div class="signature-section"><img src="${escapeHtml(operator.signature)}" alt="Signature"></div>` : ''}
+                </div>
+            `;
+        });
+
+        reportHtml += `</div></body></html>`;
+        printWindow.document.write(reportHtml);
+        printWindow.document.close();
+        printWindow.print();
+    };
+
+    const exportToExcel = async () => {
+        const XLSX_URL = "https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs";
+        try {
+            await loadScript(XLSX_URL);
+            const XLSX = (window as any).XLSX;
+            if (!XLSX) throw new Error("Excel library not loaded.");
+
+            const dataToExport = filteredLogs.map(log => ({
+                "Plod Name": log.plodName,
+                "User Name": log.userName,
+                "Role": log.operationalRole,
+                "Shift": log.shift,
+                "Start Time": new Date(log.startTime).toLocaleString(),
+                "End Time": new Date(log.endTime).toLocaleString(),
+                "Duration (s)": log.duration,
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(dataToExport);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Plod Log");
+            XLSX.writeFile(wb, "JUPBuddy_Plod_Log.xlsx");
+        } catch (error) {
+            console.error("Failed to export to Excel", error);
+            alert("Could not export to Excel.");
+        }
+    };
 
     return (
         <div>

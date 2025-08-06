@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import type { FC, ReactNode } from 'react';
 import { PlusCircle, Edit, Trash2, Save, X } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
-import type { CollectionName, UserProfile, Plod, Definition, BaseItem } from '../../types';
+import type { CollectionName } from '../../contexts/DataContext'; // FIX: Corrected import path
+import type { UserProfile, Plod, Definition, BaseItem } from '../../types';
+import { CompanySettings } from './CompanySettings'; 
 
 // --- HELPER UI COMPONENTS ---
-// In a larger app, these would be in their own files (e.g., src/components/ui/)
-
 const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: () => void }> = ({ children, isOpen, title, onClose }) => {
     if (!isOpen) return null;
     return (
@@ -54,7 +54,7 @@ const CrudManager = <T extends BaseItem>({ title, collectionName, formComponent:
 
   const handleAddNew = () => { setCurrentItem(null); setIsModalOpen(true); };
   const handleEdit = (item: T) => { setCurrentItem(item); setIsModalOpen(true); };
-  const handleDelete = (id: string) => { if (window.confirm("Are you sure you want to delete this operator? This action cannot be undone.")) { deleteItem(collectionName, id); } };
+  const handleDelete = (id: string) => { if (window.confirm("Are you sure you want to delete this? This action cannot be undone.")) { deleteItem(collectionName, id); } };
 
   const visibleData = data.filter((item) => !item.deleted);
 
@@ -226,12 +226,14 @@ export const AdminSettings: FC = () => {
                     <button onClick={() => setActiveTab('Users')} className={`py-2 px-4 font-semibold ${activeTab === 'Users' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Operators</button>
                     <button onClick={() => setActiveTab('Plods')} className={`py-2 px-4 font-semibold ${activeTab === 'Plods' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Plods</button>
                     <button onClick={() => setActiveTab('Definitions')} className={`py-2 px-4 font-semibold ${activeTab === 'Definitions' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Definitions</button>
+                    <button onClick={() => setActiveTab('Company')} className={`py-2 px-4 font-semibold ${activeTab === 'Company' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Company</button>
                 </nav>
             </div>
             <div>
                 {activeTab === "Users" && <CrudManager<UserProfile> title="Manage Operators" collectionName="users" formComponent={UserForm} columns={[{ key: "name", header: "Name" }, { key: "userId", header: "Operator ID" }, { key: "operationalRole", header: "Operational Role" }]} />}
                 {activeTab === "Plods" && <CrudManager<Plod> title="Manage Plods" collectionName="plods" formComponent={PlodForm} columns={[{ key: "name", header: "Plod Name" }]} />}
                 {activeTab === "Definitions" && <CrudManager<Definition> title="Manage Definitions" collectionName="definitions" formComponent={DefinitionForm} columns={[{ key: "name", header: "Definition Name" }, { key: "unit", header: "Unit" }]} />}
+                {activeTab === "Company" && <CompanySettings />}
             </div>
         </div>
     );
