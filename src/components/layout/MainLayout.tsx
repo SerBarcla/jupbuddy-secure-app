@@ -3,6 +3,8 @@ import type { FC } from 'react';
 import { Home, List, Settings, Wifi, Zap, LogOut, User as UserIcon } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import type { UserProfile } from '../../types';
+
+// We now import the view components from their own files
 import { Dashboard } from '../views/Dashboard';
 import { PlodLog } from '../views/PlodLog';
 import { AdminSettings } from '../views/AdminSettings';
