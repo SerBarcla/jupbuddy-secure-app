@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import type { FC, ReactNode } from 'react';
-import { Printer, FileSpreadsheet, X } from 'lucide-react';
+import type { FC,} from 'react';
+import { Printer, FileSpreadsheet, } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import type { LogEntry, UserProfile } from '../../types';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
@@ -38,40 +38,47 @@ function loadScript(url: string): Promise<void> {
 
 
 // --- HELPER UI COMPONENTS ---
-const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: () => void }> = ({ children, isOpen, title, onClose }) => {
-    if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl">
-                <div className="flex justify-between items-center p-5 border-b">
-                    <h3 className="text-xl font-bold">{title}</h3>
-                    <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100"><X /></button>
-                </div>
-                <div className="p-6 max-h-[70vh] overflow-y-auto">{children}</div>
-            </div>
-        </div>
-    );
-};
-
-const Button: FC<any> = ({ children, icon: Icon, variant = 'primary', ...props }) => {
-    const variants: { [key: string]: string } = {
-        primary: 'bg-emerald-600 text-white hover:bg-emerald-700',
-        secondary: 'bg-gray-200 text-gray-800 hover:bg-gray-300',
-    };
-    return (
-        <button {...props} className={`font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 ${variants[variant]}`}>
-            {Icon && <Icon className="w-5 h-5" />}
-            {children}
-        </button>
-    );
-};
-
-const Input: FC<any> = (props) => <input {...props} className="w-full p-2 border border-gray-300 rounded-lg" />;
+// ...existing code...
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Modal } from '../ui/Modal';
 
 const PlodDetailModal: FC<{ log: LogEntry; onClose: () => void; users: UserProfile[]; }> = ({ log, onClose, users }) => {
     const formatDuration = (s: number) => `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m ${s%60}s`;
     const operator = users.find(u => u.userId === log.userId || u.id === log.userId);
     const coworkers = (log.coworkers || []).map(id => users.find(u => u.id === id)?.name).filter(Boolean).join(", ");
+
+    const handleSignatureDownload = () => {
+        if (operator?.signature) {
+            const link = document.createElement('a');
+            link.href = operator.signature;
+            link.download = `signature_${operator.userId || operator.id}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    };
+
+    // Operator comments state and handlers
+    const [comment, setComment] = React.useState<string>("");
+    const [comments, setComments] = React.useState<string[]>(() => {
+        try {
+            const saved = localStorage.getItem(`plod_comments_${log.id}`);
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
+
+    const handleCommentSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (comment.trim()) {
+            const updated = [...comments, comment.trim()];
+            setComments(updated);
+            setComment("");
+            localStorage.setItem(`plod_comments_${log.id}`, JSON.stringify(updated));
+        }
+    };
 
     return (
         <Modal isOpen={true} onClose={onClose} title="Plod Details">
@@ -97,8 +104,32 @@ const PlodDetailModal: FC<{ log: LogEntry; onClose: () => void; users: UserProfi
                     <div className="mt-4 border-t pt-4 text-right">
                         <img src={operator.signature} alt="Signature" className="h-16 inline-block border p-1" />
                         <p className="text-sm text-gray-500">Operator Signature</p>
+                        <button type="button" className="ml-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700" onClick={handleSignatureDownload} aria-label="Download Signature">Download</button>
                     </div>
                 )}
+                <div className="mt-6 border-t pt-4">
+                    <h3 className="font-bold mb-2">Operator Comments</h3>
+                    <form onSubmit={handleCommentSubmit} className="flex gap-2 mb-2">
+                        <input
+                            type="text"
+                            value={comment}
+                            onChange={e => setComment(e.target.value)}
+                            placeholder="Add a comment..."
+                            className="flex-1 p-2 border rounded"
+                            aria-label="Add operator comment"
+                        />
+                        <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">Add</button>
+                    </form>
+                    <ul className="space-y-2">
+                        {comments.length === 0 ? (
+                            <li className="text-gray-500">No comments yet.</li>
+                        ) : (
+                            comments.map((c, i) => (
+                                <li key={i} className="bg-gray-100 p-2 rounded text-gray-800">{c}</li>
+                            ))
+                        )}
+                    </ul>
+                </div>
             </div>
         </Modal>
     );
@@ -111,8 +142,27 @@ export const PlodLog: FC = () => {
     const [companySettings] = useLocalStorage("companySettings", { name: "JUPBuddy Report", logo: "" });
     const [filters, setFilters] = useState({ dateFrom: "", dateTo: "", shift: "", userId: "", plodId: "" });
     const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
+    const [filterError, setFilterError] = useState<string>("");
 
-    const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFilters(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        setFilters(prev => {
+            const updated = { ...prev, [name]: value };
+            // Date range validation
+            if (updated.dateFrom && updated.dateTo) {
+                const from = new Date(updated.dateFrom);
+                const to = new Date(updated.dateTo);
+                if (from > to) {
+                    setFilterError("Start date cannot be after end date.");
+                } else {
+                    setFilterError("");
+                }
+            } else {
+                setFilterError("");
+            }
+            return updated;
+        });
+    };
 
     const filteredLogs = useMemo(() => {
         return logs.filter(log => {
@@ -251,42 +301,61 @@ export const PlodLog: FC = () => {
                     <Button onClick={exportToExcel} variant="secondary" icon={FileSpreadsheet}>Export to Excel</Button>
                 </div>
             </div>
-            <div className="bg-white p-4 rounded-xl shadow-md mb-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                <Input type="date" name="dateFrom" value={filters.dateFrom} onChange={handleFilterChange} />
-                <Input type="date" name="dateTo" value={filters.dateTo} onChange={handleFilterChange} />
-                <select name="shift" value={filters.shift} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg">
+            <form className="bg-white p-4 rounded-xl shadow-md mb-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4" aria-label="Plod Log Filters" role="region">
+                <label htmlFor="dateFrom" className="sr-only">Start Date</label>
+                <Input type="date" id="dateFrom" name="dateFrom" value={filters.dateFrom} onChange={handleFilterChange} aria-label="Start Date" />
+                <label htmlFor="dateTo" className="sr-only">End Date</label>
+                <Input type="date" id="dateTo" name="dateTo" value={filters.dateTo} onChange={handleFilterChange} aria-label="End Date" />
+                <label htmlFor="shift" className="sr-only">Shift</label>
+                <select id="shift" name="shift" value={filters.shift} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg" aria-label="Shift">
                     <option value="">All Shifts</option>
                     <option value="DS">Day Shift</option>
                     <option value="NS">Night Shift</option>
                 </select>
-                <select name="userId" value={filters.userId} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg">
+                <label htmlFor="userId" className="sr-only">User</label>
+                <select id="userId" name="userId" value={filters.userId} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg" aria-label="User">
                     <option value="">All Users</option>
                     {users.filter(u => !u.deleted).map(u => <option key={u.id} value={u.userId}>{u.name}</option>)}
                 </select>
-                <select name="plodId" value={filters.plodId} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg">
+                <label htmlFor="plodId" className="sr-only">Plod</label>
+                <select id="plodId" name="plodId" value={filters.plodId} onChange={handleFilterChange} className="w-full p-2 border border-gray-300 rounded-lg" aria-label="Plod">
                     <option value="">All Plods</option>
                     {plods.filter(p => !p.deleted).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
-            </div>
-            <div className="bg-white rounded-xl shadow-md overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plod</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+            </form>
+            {filterError && (
+                <div className="mb-4 text-red-600 font-medium" role="alert" aria-live="assertive">{filterError}</div>
+            )}
+            <div className="bg-white rounded-xl shadow-md overflow-x-auto" role="region" aria-label="Plod Log Table">
+                <table className="min-w-full divide-y divide-gray-200" aria-label="Plod Log Table" role="table">
+                    <thead className="bg-gray-50" role="rowgroup">
+                        <tr role="row">
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User / Role</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plod</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
                         </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredLogs.map(log => (
-                            <tr key={log.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedLog(log)}>
-                                <td className="px-6 py-4 whitespace-nowrap">{new Date(log.startTime).toLocaleString()}</td>
-                                <td className="px-6 py-4 whitespace-nowrap">{log.userName}</td>
-                                <td className="px-6 py-4 whitespace-nowrap font-semibold">{log.plodName}</td>
-                                <td className="px-6 py-4 whitespace-nowrap font-mono">{formatDuration(log.duration)}</td>
+                    <tbody className="bg-white divide-y divide-gray-200" role="rowgroup">
+                        {filteredLogs.length === 0 ? (
+                            <tr role="row">
+                                <td colSpan={4} className="px-6 py-8 text-center text-gray-500">No logs found for the selected filters.</td>
                             </tr>
-                        ))}
+                        ) : (
+                            filteredLogs.map(log => (
+                                <tr key={log.id} role="row" tabIndex={0} className="hover:bg-gray-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" onClick={() => setSelectedLog(log)}>
+                                    <td className="px-6 py-4 whitespace-nowrap">{new Date(log.startTime).toLocaleString()}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        {log.userName}
+                                        {log.operationalRole && (
+                                            <span className="ml-2 px-2 py-1 text-xs rounded bg-blue-100 text-blue-800" title="Operator Role">{log.operationalRole}</span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap font-semibold">{log.plodName}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap font-mono">{formatDuration(log.duration)}</td>
+                                </tr>
+                            ))
+                        )}
                     </tbody>
                 </table>
             </div>

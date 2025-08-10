@@ -2,21 +2,8 @@ import React from 'react';
 import type { FC } from 'react';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 import { Save } from 'lucide-react';
-
-// --- HELPER UI COMPONENTS ---
-const Button: FC<any> = ({ children, icon: Icon, variant = 'primary', ...props }) => {
-    const variants: { [key: string]: string } = {
-        primary: 'bg-emerald-600 text-white hover:bg-emerald-700',
-    };
-    return (
-        <button {...props} className={`font-bold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2 ${variants[variant]}`}>
-            {Icon && <Icon className="w-5 h-5" />}
-            {children}
-        </button>
-    );
-};
-
-const Input: FC<any> = (props) => <input {...props} className="w-full p-2 border border-gray-300 rounded-lg" />;
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
 
 
 // --- COMPANY SETTINGS VIEW ---
