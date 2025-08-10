@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import type { FC, ReactNode } from 'react';
 import { PlusCircle, Edit, Trash2, Save, X } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
-import type { CollectionName } from '../../contexts/DataContext'; // FIX: Corrected import path
+import type { CollectionName } from '../../contexts/DataContext';
 import type { UserProfile, Plod, Definition, BaseItem } from '../../types';
-import { CompanySettings } from './CompanySettings'; 
+import { CompanySettings } from './CompanySettings'; // <-- IMPORT THE NEW COMPONENT
 
 // --- HELPER UI COMPONENTS ---
 const Modal: FC<{ children: ReactNode, isOpen: boolean, title: string, onClose: () => void }> = ({ children, isOpen, title, onClose }) => {
@@ -226,6 +226,7 @@ export const AdminSettings: FC = () => {
                     <button onClick={() => setActiveTab('Users')} className={`py-2 px-4 font-semibold ${activeTab === 'Users' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Operators</button>
                     <button onClick={() => setActiveTab('Plods')} className={`py-2 px-4 font-semibold ${activeTab === 'Plods' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Plods</button>
                     <button onClick={() => setActiveTab('Definitions')} className={`py-2 px-4 font-semibold ${activeTab === 'Definitions' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Definitions</button>
+                    {/* ADDED COMPANY TAB */}
                     <button onClick={() => setActiveTab('Company')} className={`py-2 px-4 font-semibold ${activeTab === 'Company' ? 'border-b-2 border-emerald-600 text-emerald-600' : ''}`}>Company</button>
                 </nav>
             </div>
@@ -233,6 +234,7 @@ export const AdminSettings: FC = () => {
                 {activeTab === "Users" && <CrudManager<UserProfile> title="Manage Operators" collectionName="users" formComponent={UserForm} columns={[{ key: "name", header: "Name" }, { key: "userId", header: "Operator ID" }, { key: "operationalRole", header: "Operational Role" }]} />}
                 {activeTab === "Plods" && <CrudManager<Plod> title="Manage Plods" collectionName="plods" formComponent={PlodForm} columns={[{ key: "name", header: "Plod Name" }]} />}
                 {activeTab === "Definitions" && <CrudManager<Definition> title="Manage Definitions" collectionName="definitions" formComponent={DefinitionForm} columns={[{ key: "name", header: "Definition Name" }, { key: "unit", header: "Unit" }]} />}
+                {/* RENDER COMPANY SETTINGS VIEW */}
                 {activeTab === "Company" && <CompanySettings />}
             </div>
         </div>
