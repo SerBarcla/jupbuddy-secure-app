@@ -63,9 +63,10 @@ const PlodDetailModal: FC<{ log: LogEntry; onClose: () => void; users: UserProfi
     const [comment, setComment] = React.useState<string>("");
     const [comments, setComments] = React.useState<string[]>(() => {
         try {
-            const saved = localStorage.getItem(`plod_comments_${log.id}`);
+            const saved = window.localStorage.getItem(`plod_comments_${log.id}`);
             return saved ? JSON.parse(saved) : [];
-        } catch {
+        } catch (err) {
+            console.error('LocalStorage unavailable:', err);
             return [];
         }
     });

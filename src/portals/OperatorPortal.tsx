@@ -58,12 +58,13 @@ const OperatorDataProvider: FC<{ children: ReactNode; operator: UserProfile }> =
                 batch.set(docRef, logData);
             }
             await batch.commit();
-            
             setLogs(prev => prev.filter(log => !(log as any).dirty));
             alert("Sync successful!");
         } catch (error) {
             console.error("Operator sync failed:", error);
-            alert(`Sync failed: ${(error as Error).message}`);
+            if (window.confirm(`Sync failed: ${(error as Error).message}\nWould you like to retry?`)) {
+                handleSync();
+            }
         } finally {
             setIsSyncing(false);
         }
@@ -187,14 +188,18 @@ const SignaturePad: FC<{ onSave: (signature: string) => void }> = ({ onSave }) =
 
   const handleSave = () => {
     const canvas = canvasRef.current!;
-    const blank = document.createElement("canvas");
-    blank.width = canvas.width;
-    blank.height = canvas.height;
-    if (canvas.toDataURL() === blank.toDataURL()) {
-      alert("Please provide a signature.");
-      return;
-    }
-    onSave(canvas.toDataURL("image/png"));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        // Check if canvas is blank
+        const blank = document.createElement('canvas');
+        blank.width = canvas.width;
+        blank.height = canvas.height;
+        if (canvas.toDataURL() === blank.toDataURL()) {
+            alert('Please provide a signature before saving.');
+            return;
+        }
+        const dataUrl = canvas.toDataURL();
+        onSave(dataUrl);
   };
 
   useEffect(() => {
@@ -240,13 +245,20 @@ const AddDataModal: FC<{
   const [definitionId, setDefinitionId] = useState("");
   const [value, setValue] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const definition = definitions.find(d => d.id === definitionId);
-    if (!definition || !value) return;
-    onSave({ definitionId: definition.id, name: definition.name, value: value, unit: definition.unit || "" });
-    onClose();
-  };
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const definition = definitions.find(d => d.id === definitionId);
+        if (!definition) {
+            alert('Please select a valid item.');
+            return;
+        }
+        if (!value) {
+            alert('Please enter a value.');
+            return;
+        }
+        onSave({ definitionId: definition.id, name: definition.name, value: value, unit: definition.unit || "" });
+        onClose();
+    };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Add Data / Consumable">
@@ -452,7 +464,7 @@ const OperatorLoginPage: FC<{ onLoginSuccess: (operatorData: UserProfile) => voi
         }
         const operatorDoc = querySnapshot.docs[0];
         const operatorData = { id: operatorDoc.id, ...operatorDoc.data() } as UserProfile;
-        if (operatorData.pin === pin) {
+    if (String(operatorData.pin) === String(pin)) {
             onLoginSuccess(operatorData);
         } else {
             setError('Invalid PIN.');
