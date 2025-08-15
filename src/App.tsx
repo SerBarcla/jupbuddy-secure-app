@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styled, { ThemeProvider } from 'styled-components';
 import { AdminPortal } from './portals/AdminPortal';
 import { OperatorPortal } from './portals/OperatorPortal';
@@ -117,11 +117,41 @@ const App = () => {
   );
 }
 
-// The ThemeProvider wraps the entire application
-const ThemedApp = () => (
-    <ThemeProvider theme={theme}>
-        <App />
-    </ThemeProvider>
+// --- ANIMATED LOADING SCREEN ---
+const LoadingScreen = () => (
+  <div style={{
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100vh',
+    background: '#292524',
+    color: '#34d399',
+    fontFamily: 'Inter, sans-serif',
+  }}>
+    <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="40" cy="40" r="36" stroke="#34d399" strokeWidth="8" opacity="0.2" />
+      <circle cx="40" cy="40" r="36" stroke="#34d399" strokeWidth="8" strokeDasharray="56 100" strokeDashoffset="0">
+        <animateTransform attributeName="transform" type="rotate" from="0 40 40" to="360 40 40" dur="1s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+    <h2 style={{ marginTop: '2rem', fontSize: '2rem', fontWeight: 'bold' }}>JUP<span style={{ color: '#fff' }}>Buddy</span></h2>
+    <p style={{ color: '#a8a29e', marginTop: '1rem' }}>Loading...</p>
+  </div>
 );
+
+const ThemedApp = () => {
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    // Simulate loading for 1.5s or until app is ready
+    const timer = setTimeout(() => setLoading(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <ThemeProvider theme={theme}>
+      {loading ? <LoadingScreen /> : <App />}
+    </ThemeProvider>
+  );
+};
 
 export default ThemedApp;
